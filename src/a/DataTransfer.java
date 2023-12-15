@@ -16,45 +16,52 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 public class DataTransfer {
-	private static final Logger logger = Logger.getLogger(DataTransfer.class.getName());
+	  private static final Logger logger = Logger.getLogger(DataTransfer.class.getName());
 
-	static {
-		Handler dbHandler = new DatabaseHandler();
-		logger.addHandler(dbHandler);
-	}
+	    static {
+	        Handler dbHandler = new DatabaseHandler();
+	        logger.addHandler(dbHandler);
+	    }
 
-	public static void main(String[] args) {
-		Properties properties = loadProperties("config.properties");
+	    public static void main(String[] args) {
+	    	
+	        Properties properties = loadProperties("config.properties");
 
-		try {
-			logger.log(Level.INFO, "Staging to warehouse start.");
-			
-			// Load the MySQL JDBC driver
-			Class.forName("com.mysql.cj.jdbc.Driver");
+	        try {
+	        	if (isStagingSuccessful(properties)) {
+	            logger.log(Level.INFO, "Staging to warehouse start.");
 
-			// Source database connection
-			Connection sourceConn = DriverManager.getConnection(properties.getProperty("source.db.url"),
-					properties.getProperty("source.db.username"), properties.getProperty("source.db.password"));
+	            // Check the log for successful staging
+	            
+	                // Load the MySQL JDBC driver
+	                Class.forName("com.mysql.cj.jdbc.Driver");
 
-			// Destination database connection
-			Connection destConn = DriverManager.getConnection(properties.getProperty("dest.db.url"),
-					properties.getProperty("dest.db.username"), properties.getProperty("dest.db.password"));
+	                // Source database connection
+	                Connection sourceConn = DriverManager.getConnection(properties.getProperty("source.db.url"),
+	                        properties.getProperty("source.db.username"), properties.getProperty("source.db.password"));
 
-			// Transfer data from source to destination
-			transferData(sourceConn, destConn);
+	                // Destination database connection
+	                Connection destConn = DriverManager.getConnection(properties.getProperty("dest.db.url"),
+	                        properties.getProperty("dest.db.username"), properties.getProperty("dest.db.password"));
 
-			// Log the end of the code
-			logger.log(Level.INFO, "Staging to warehouse completed.");
+	                // Transfer data from source to destination
+	                transferData(sourceConn, destConn);
 
-			// Close connections
-			sourceConn.close();
-			destConn.close();
+	                // Log the end of the code
+	                logger.log(Level.INFO, "Staging to warehouse completed.");
 
-		} catch (ClassNotFoundException | SQLException e) {
-			// Log the error
-			logger.log(Level.SEVERE, "Staging to warehouse failed.", e);
-		}
-	}
+	                // Close connections
+	                sourceConn.close();
+	                destConn.close();
+	            } else {
+	                logger.log(Level.INFO, "Staging to warehouse skipped due to previous failure.");
+	            }
+
+	        } catch (ClassNotFoundException | SQLException e) {
+	            // Log the error
+	            logger.log(Level.SEVERE, "Staging to warehouse failed.", e);
+	        }
+	    }
 
 	private static Properties loadProperties(String filePath) {
 		Properties properties = new Properties();
@@ -106,16 +113,47 @@ public class DataTransfer {
 			// Not needed for this example
 		}
 	}
+	private static boolean isStagingSuccessful(Properties properties) {
+	    try {
+	        // Set up your database connection
+	        Connection dbConn = DriverManager.getConnection(properties.getProperty("log.db.url"),
+	                properties.getProperty("log.db.username"), properties.getProperty("log.db.password"));
 
+	        // Check if there is a successful staging log entry with the current date and highest id
+	        PreparedStatement stmt = dbConn.prepareStatement(
+	                "SELECT COUNT(*) FROM log WHERE phase = 'staging' AND result = 'Thành công' " +
+	                "AND DATE(tracking_date) = CURDATE() " +
+	                "AND id = (SELECT MAX(id) FROM log)");
+	        
+	        ResultSet resultSet = stmt.executeQuery();
+
+	        if (resultSet.next()) {
+	            int count = resultSet.getInt(1);
+	            return count > 0;
+	        }
+
+	        // Close resources
+	        stmt.close();
+	        dbConn.close();
+
+	    } catch (SQLException e) {
+	        e.printStackTrace();
+	    }
+
+	    // Default to false if there is an exception
+	    return false;
+	}
 	private static void transferData(Connection sourceConn, Connection destConn) throws SQLException {
-		// Transfer data for the result_lottery table
-		transferResultLotteryData(sourceConn, destConn);
+		
 
 		// Transfer data for the province table
 		transferProvinceData(sourceConn, destConn);
 
 		// Transfer data for the date table
 		transferDateData(sourceConn, destConn);
+		
+		// Transfer data for the result_lottery table
+		transferResultLotteryData(sourceConn, destConn);
 	}
 
 	private static void transferResultLotteryData(Connection sourceConn, Connection destConn) throws SQLException {
