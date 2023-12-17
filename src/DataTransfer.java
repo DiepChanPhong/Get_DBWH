@@ -1,4 +1,4 @@
-package a;
+
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -9,6 +9,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Properties;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -24,18 +26,18 @@ public class DataTransfer {
 	    }
 
 	    public static void main(String[] args) {
-	    	
+	    	//2.Lấy cấu hình từ file config.properties
 	        Properties properties = loadProperties("config.properties");
 
 	        try {
+	        	//4. Kiểm tra bước trước đó có thành công hay không
 	        	if (isStagingSuccessful(properties)) {
+	        	//5. Ghi log bắt đầu lấy dữ liệu	
 	            logger.log(Level.INFO, "Staging to warehouse start.");
 
 	            // Check the log for successful staging
-	            
-	                // Load the MySQL JDBC driver
-	                Class.forName("com.mysql.cj.jdbc.Driver");
-
+	        	    Class.forName("com.mysql.cj.jdbc.Driver");
+	                //6. Kết nối DB staging và DB data_warehouse
 	                // Source database connection
 	                Connection sourceConn = DriverManager.getConnection(properties.getProperty("source.db.url"),
 	                        properties.getProperty("source.db.username"), properties.getProperty("source.db.password"));
@@ -45,20 +47,22 @@ public class DataTransfer {
 	                        properties.getProperty("dest.db.username"), properties.getProperty("dest.db.password"));
 
 	                // Transfer data from source to destination
+	                //7.
 	                transferData(sourceConn, destConn);
 
-	                // Log the end of the code
+	                // 19. Ghi log chuyển dữ liệu thành công
 	                logger.log(Level.INFO, "Staging to warehouse completed.");
 
 	                // Close connections
 	                sourceConn.close();
 	                destConn.close();
 	            } else {
-	                logger.log(Level.INFO, "Staging to warehouse skipped due to previous failure.");
+	                logger.log(Level.SEVERE, "Staging to warehouse skipped due to previous failure.");
 	            }
 
 	        } catch (ClassNotFoundException | SQLException e) {
 	            // Log the error
+//	        	e.printStackTrace();
 	            logger.log(Level.SEVERE, "Staging to warehouse failed.", e);
 	        }
 	    }
@@ -83,7 +87,7 @@ public class DataTransfer {
 						properties.getProperty("log.db.username"), properties.getProperty("log.db.password"));
 				// Insert log record into the database
 				PreparedStatement stmt = dbConn.prepareStatement(
-						"INSERT INTO log (tracking_date, source, connect_status, destination, phase, result, detail) VALUES (?, ?, ?, ?, ?, ?, ?)");
+						"INSERT INTO log (tracking_date_time, source, connect_status, destination, phase, result, detail) VALUES (?, ?, ?, ?, ?, ?, ?)");
 				stmt.setTimestamp(1, new Timestamp(record.getMillis()));
 				stmt.setString(2, "staging.db.lottery");
 				stmt.setInt(3, record.getLevel() == Level.INFO ? 1 : 0);
@@ -115,14 +119,14 @@ public class DataTransfer {
 	}
 	private static boolean isStagingSuccessful(Properties properties) {
 	    try {
-	        // Set up your database connection
+	        // 3. Kết nối DB Control
 	        Connection dbConn = DriverManager.getConnection(properties.getProperty("log.db.url"),
 	                properties.getProperty("log.db.username"), properties.getProperty("log.db.password"));
 
 	        // Check if there is a successful staging log entry with the current date and highest id
 	        PreparedStatement stmt = dbConn.prepareStatement(
-	                "SELECT COUNT(*) FROM log WHERE phase = 'staging' AND result = 'Thành công' " +
-	                "AND DATE(tracking_date) = CURDATE() " +
+	                "SELECT COUNT(*) FROM log WHERE phase = 'csv to staging' AND result = 'Thành công' " +
+	                "AND DATE(tracking_date_time) = CURDATE() " +
 	                "AND id = (SELECT MAX(id) FROM log)");
 	        
 	        ResultSet resultSet = stmt.executeQuery();
@@ -145,7 +149,7 @@ public class DataTransfer {
 	}
 	private static void transferData(Connection sourceConn, Connection destConn) throws SQLException {
 		
-
+		
 		// Transfer data for the province table
 		transferProvinceData(sourceConn, destConn);
 
@@ -159,6 +163,7 @@ public class DataTransfer {
 	private static void transferResultLotteryData(Connection sourceConn, Connection destConn) throws SQLException {
 		// Truy vấn dữ liệu từ cơ sở dữ liệu nguồn
 		Statement sourceStmt = sourceConn.createStatement();
+		//13. Lấy dữ liệu từ bảng loterry từ DB Staging
 		ResultSet resultSet = sourceStmt.executeQuery("SELECT * FROM lottery");
 
 		// Thêm dữ liệu vào cơ sở dữ liệu đích
@@ -166,6 +171,7 @@ public class DataTransfer {
 				"INSERT INTO result_lottery (prize_name, result, province_id, date_id) VALUES (?, ?, ?, ?)");
 
 		while (resultSet.next()) {
+			//14. Xử lý dữ liệu về đúng định dạng
 			int id = resultSet.getInt("id");
 			String province = resultSet.getString("province");
 			String[] prizes = { resultSet.getString("prize_eight"), resultSet.getString("prize_seven"),
@@ -174,15 +180,16 @@ public class DataTransfer {
 					resultSet.getString("prize_two"), resultSet.getString("prize_one"),
 					resultSet.getString("prize_special") };
 			String date = resultSet.getString("date");
-
+			//15. lấy province_id và date_id
 			// Lấy province_id từ cơ sở dữ liệu đích
 			int provinceId = getProvinceId(destConn, province);
 
 			// Lấy date_id từ cơ sở dữ liệu đích
 			int dateId = getDateId(destConn, date);
 
-			// Thêm dữ liệu vào cơ sở dữ liệu đích cho từng giải
+			// 16/18
 			for (int i = 0; i < prizes.length; i++) {
+				//17. Lưu dữ liệu giải theo giá trị i+1
 				destStmt.setString(1, "prize " + (i + 1)); // Giả sử tên giải là "Giải 1", "Giải 2", ...
 				destStmt.setString(2, prizes[i]);
 				destStmt.setInt(3, provinceId);
@@ -227,6 +234,7 @@ public class DataTransfer {
 	private static void transferProvinceData(Connection sourceConn, Connection destConn) throws SQLException {
 		// Retrieve data from the source database
 		Statement sourceStmt = sourceConn.createStatement();
+		//7. Lấy dữ liệu từ bảng province từ DB staging và xử lý đúng định dạng
 		ResultSet resultSet = sourceStmt.executeQuery("SELECT DISTINCT province FROM lottery");
 
 		// Insert data into the destination database
@@ -235,8 +243,9 @@ public class DataTransfer {
 		while (resultSet.next()) {
 			String nameProvince = resultSet.getString("province");
 
-			// Check if province already exists in the destination database
+			// 8. Kiểm tra dữ liệu đã có trong dim_province không
 			if (!provinceExists(destConn, nameProvince)) {
+				//9. Lưu dữ liệu vào dim_province
 				destStmt.setString(1, nameProvince);
 				destStmt.executeUpdate();
 			}
@@ -258,23 +267,29 @@ public class DataTransfer {
 	private static void transferDateData(Connection sourceConn, Connection destConn) throws SQLException {
 		// Retrieve data from the source database
 		Statement sourceStmt = sourceConn.createStatement();
+		//10. Lấy dữ liệu từ bảng date từ DB staging và xử lý đúng định dạng
 		ResultSet resultSet = sourceStmt.executeQuery("SELECT DISTINCT date FROM lottery");
 
 		// Insert data into the destination database
 		PreparedStatement destStmt = destConn
-				.prepareStatement("INSERT INTO dim_date (id, full_date, day, month, year) VALUES (?, ?, ?, ?, ?)");
+				.prepareStatement("INSERT INTO dim_date ( full_date, day, month, year) VALUES ( ?, ?, ?, ?)");
 
 		while (resultSet.next()) {
+			// xử lý đúng định dạng
+
 			String dateStr = resultSet.getString("date");
 
-			// Assuming the date format is "dd/MM/yyyy"
-			String[] dateParts = dateStr.split("/");
-			int day = Integer.parseInt(dateParts[0]);
-			int month = Integer.parseInt(dateParts[1]);
-			int year = Integer.parseInt(dateParts[2]);
-
-			// Check if date already exists in the destination database
+	        // Chuyển đổi chuỗi thành đối tượng LocalDateTime
+	        LocalDateTime dateTime = LocalDateTime.parse(dateStr, DateTimeFormatter.ISO_DATE_TIME);
+	        
+	        // Lấy ngày, tháng, và năm từ đối tượng LocalDateTime
+	        int day = dateTime.getDayOfMonth();
+	        int month = dateTime.getMonthValue();
+	        int year = dateTime.getYear();
+			
+			// 11. Kiểm tra dữ liệu đã có trong DB data_warehouse không
 			if (!dateExists(destConn, dateStr)) {
+				//12. Lưu dữ liệu vào dim_date 
 				destStmt.setString(1, dateStr);
 				destStmt.setInt(2, day);
 				destStmt.setInt(3, month);
